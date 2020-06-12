@@ -34,16 +34,16 @@
 # Path where a directory <databasename> will be created for each database (no trailing slash).
 # If you're using rsnapshot, this directory should be somewhere in the current working directory
 # BACKUP_DIR="."
-BACKUP_DIR="./mysqldumps"
+BACKUP_DIR="/sqldumps"
 
 # Define which databases to exclude when fetching database names from mysql host
 # Normally you always want to exclude mysql, Database, information_schema and performance_schema
-MYSQL_EXCLUDE_DB="(^mysql$|^Database$|information_schema|performance_schema|^phpmyadmin$|^test_|_test$|_bak$|^bak_)"
+MYSQL_EXCLUDE_DB="(^mysql$|^Database$|information_schema|performance_schema|sys|^phpmyadmin$|^test_|_test$|_bak$|^bak_)"
 
 MYSQL_EXCLUDE_TABLES="(\.sp_geodb_)"
 
 # File to hold [client] host, port, user and password (data source)
-MYSQL_CNF_FILE="/root/rsnapshot-mysql.cnf"
+#MYSQL_CNF_FILE="/root/rsnapshot-mysql.cnf"
 
 # This is the format for the credentials at cnf file:
 #
@@ -81,25 +81,40 @@ echo " Rsnapshot friendly tool to pull all MySQL DBs from a host, One File Per T
 echo " "
 
 # show usage if not enough arguments are given
-if [ -z $3 ] ;then
+if [ -z $2 ] ;then
 	echo " "
-	echo "Required parameters: dbhost     compression   port  [file.cnf]	[test]"
-	echo "            Example: localhost  none|gz|bz2   3306  default.cnf	test"
+	echo "Required parameters: login-path compression [test]"
+	echo "            Example: client  none|gz|bz2    test"
 	echo " "
-	echo "  Will try to connect using credentials from file.cnf (defaults to: $MYSQL_CNF_FILE)"
+#	echo "  Will try to connect using credentials from file.cnf (defaults to: $MYSQL_CNF_FILE)"
 	exit 1;
 fi
 
 # create our own vars from arguments
-MYSQL_HOST=$1
-COMPRESSION=$2
-MYSQL_PORT=$3
-CLIENT_CNF=$4
-TEST_RUN=$5
+#MYSQL_HOST=$1
+#COMPRESSION=$2
+#MYSQL_PORT=$3
+#CLIENT_CNF=$4
+#TEST_RUN=$5
 
-if [ ! -z "$CLIENT_CNF" ] ;then
-	MYSQL_CNF_FILE=$CLIENT_CNF
+LOGIN_PATH=$1
+COMPRESSION=$2
+TEST_RUN=$3
+
+#if [ ! -z "$CLIENT_CNF" ] ;then
+#	MYSQL_CNF_FILE=$CLIENT_CNF
+#fi
+if [ -z "$LOGIN_PATH" ] ;then
+	echo "ERROR: parametre login-path est vide"
+	exit 1
 fi
+
+echo "Login-path=$LOGIN_PATH"
+mysql_config_editor print --login-path=$LOGIN_PATH
+
+MYSQL_HOST=`mysql_config_editor print --login-path=client | grep host`
+MYSQL_HOST=$(echo $MYSQL_HOST | awk -F '=' '{print $2}' | sed 's/ //g')
+#echo "MySQL Host=[$MYSQL_HOST]"
 
 # common flags for mysqldump command
 MYSQL_DUMP_FLAGS="--compress --hex-blob --force --skip-dump-date"
@@ -108,25 +123,28 @@ if [[ $MYSQL_HOST == "localhost" ]] || [[ $MYSQL_HOST == "127.0.0.1" ]] ;then
 	# do not need to compress if host is localhost
 	MYSQL_DUMP_FLAGS="--hex-blob --force --skip-dump-date"
 fi
+#echo "MYSQL_DUMP_FLAGS=$MYSQL_DUMP_FLAGS"
 
 # check the provided file for mysql password
-if [ ! -f $MYSQL_CNF_FILE ] ;then
-	echo "ERROR: Cannot read: $MYSQL_CNF_FILE"
-	exit 1
-fi
-if [ ! -s $MYSQL_CNF_FILE ] ;then
-	echo "ERROR: File is empty: $MYSQL_CNF_FILE"
-	exit 1
-fi
+#if [ ! -f $MYSQL_CNF_FILE ] ;then
+#	echo "ERROR: Cannot read: $MYSQL_CNF_FILE"
+#	exit 1
+#fi
+#if [ ! -s $MYSQL_CNF_FILE ] ;then
+#	echo "ERROR: File is empty: $MYSQL_CNF_FILE"
+#	exit 1
+#fi
 
 # Deprecated method of getting mysql password...
 # get mysql password from defined file, expecting one line, one word, filtering any newlines
 # MYSQL_PASSWORD=`printf "%s" "$(< $MYSQL_PASSWORD_FILE)"`
 
 # host, user, password for mysql
-MYSQL_HUP="--defaults-extra-file=$MYSQL_CNF_FILE --host=$MYSQL_HOST --port=$MYSQL_PORT"
+#MYSQL_HUP="--defaults-extra-file=$MYSQL_CNF_FILE --host=$MYSQL_HOST --port=$MYSQL_PORT"
+MYSQL_HUP="--login-path=$LOGIN_PATH"
 
-echo "Will try to dump databases from [$MYSQL_HOST] to: [$BACKUP_DIR] using [$MYSQL_CNF_FILE] [$MYSQL_HUP]"
+#echo "Will try to dump databases from [$MYSQL_HOST] to: [$BACKUP_DIR] using [$MYSQL_CNF_FILE] [$MYSQL_HUP]"
+echo "Backup directory=$BACKUP_DIR"
 echo " "
 if [ ! -z "$TEST_RUN" ] ;then
 	echo "(TEST RUN) Will NOT dump anything."
@@ -154,14 +172,16 @@ mkdir -p $BACKUP_DIR
 # test connection to given mysql host by using mysqlshow
 echo " "
 printf 'Testing connection to MySQL ... '
+#echo "HUP=$MYSQL_HUP"
 
-RESULT=`mysqlshow $MYSQL_HUP | grep -v Wildcard | grep -o Databases`
+RESULT=`mysqlshow $MYSQL_HUP | grep -o Databases`
 if [[ "$RESULT" == "Databases" ]]; then
 	printf "OK.\n"
 else
-	printf "ERROR: Cannot connect to MySQL server. Aborting. Using password from: $MYSQL_CNF_FILE\n\n"
+	printf "ERROR: Cannot connect to MySQL server. Aborting.\n\n"
 	exit 1;
 fi
+
 
 # dump mysql host version info
 echo " "
@@ -188,12 +208,11 @@ fi
 # dump grants
 if [ -z "$TEST_RUN" ]; then
 	echo "Dumping GRANTs to $BACKUP_DIR/mysql-grants-$MYSQL_HOST.sql"
-	mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e"SELECT CONCAT('SHOW GRANTS FOR ''',user,'''@''',host,''';') FROM mysql.user WHERE user<>''" | mysql --defaults-extra-file=$MYSQL_CNF_FILE --host=$MYSQL_HOST --port=$MYSQL_PORT --no-auto-rehash --skip-column-names | sed 's/$/;/g' > $BACKUP_DIR/mysql-grants-$MYSQL_HOST.sql
+	mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e"SELECT CONCAT('SHOW GRANTS FOR ''',user,'''@''',host,''';') FROM mysql.user WHERE user<>''" | mysql $MYSQL_HUP --no-auto-rehash --skip-column-names | sed 's/$/;/g' > $BACKUP_DIR/mysql-grants-$MYSQL_HOST.sql
 else
 	echo "(TEST RUN) Skipping GRANTs dump"
 fi
 echo " "
-
 
 # get database list
 echo "Getting database list to dump ... "
@@ -206,11 +225,6 @@ databaselist=`mysql $MYSQL_HUP --no-auto-rehash -e "SHOW DATABASES;" | grep -Ev 
 # loop all database names
 for db in $databaselist; do
 
-	# exclude system and other databases
-	if [[ $db == "mysql" ]] || [[ $db == "phpmyadmin" ]] ;then
-		continue
-	fi
-
 	# create a sub-directory using database name, no errors, recursive
 	mkdir -p $BACKUP_DIR/$db
 
@@ -219,7 +233,6 @@ for db in $databaselist; do
 		rm -f $BACKUP_DIR/$db/*.sql* $BACKUP_DIR/$db/*.txt
 	fi
 
-
 	if [ ! -z "$TEST_RUN" ]; then
 		printf 'Found DB: %s \n' $db
 	else
@@ -227,8 +240,8 @@ for db in $databaselist; do
 	fi
 
 	# get a list of db.table.engine
-	db_table_engine_list=`mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e "SELECT CONCAT(table_schema,'.',table_name,'.',engine) FROM information_schema.tables WHERE table_schema = '${db}'" | grep -Ev "$MYSQL_EXCLUDE_TABLES"`
-	db_table_list=`mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e "SELECT CONCAT(table_schema,'.',table_name) FROM information_schema.tables WHERE table_schema = '${db}'" | grep -Ev "$MYSQL_EXCLUDE_TABLES"`
+	db_table_engine_list=`mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e "SELECT CONCAT(table_schema,'.',table_name,'.',engine) FROM information_schema.tables WHERE table_type<>'VIEW' AND table_schema = '${db}'" | grep -Ev "$MYSQL_EXCLUDE_TABLES"`
+	db_table_list=`mysql $MYSQL_HUP --no-auto-rehash --skip-column-names -e "SELECT CONCAT(table_schema,'.',table_name) FROM information_schema.tables WHERE table_type<>'VIEW' AND table_schema = '${db}'" | grep -Ev "$MYSQL_EXCLUDE_TABLES"`
 
 	# save the db table list
 	# if [ -z "$TEST_RUN" ]; then
@@ -256,7 +269,6 @@ for db in $databaselist; do
 	RESTOREDB=\"$dbr\"
 
 	MYSQL_HOST=\$1
-	MYSQL_CNF_FILE="$MYSQL_CNF_FILE"
 
 	# checks
 
@@ -273,14 +285,6 @@ for db in $databaselist; do
 	else
 	    echo \"Cannot find $db.sql* files. Please execute the script under its directory.\"
 	    exit 1
-	fi
-	if [ ! -f \$MYSQL_CNF_FILE ] ;then
-		echo \"Cannot read: \$MYSQL_CNF_FILE\"
-		exit 1
-	fi
-	if [ ! -s \$MYSQL_CNF_FILE ] ;then
-		echo \"File is empty: \$MYSQL_CNF_FILE\"
-		exit 1
 	fi
 
 	echo \" \"
