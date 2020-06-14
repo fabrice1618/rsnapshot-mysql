@@ -11,3 +11,12 @@ Features:
   - Ready to work with "backup_script" feature of rsnapshot, an incremental snapshot utility for local and remote filesystems.
   - Creates a convenient restore script (BASH) for each database, under each dump directory.
   - Creates backup of GRANTs (mysql permissions), and info files with the list of tables and mysql version.
+
+Modifications au script original:  
+ 	- Le système d'authentification est remplacé par le système intégré dans MySQL: les ogin-path. Plus sûr, car les mots de passe sont hashés
+  - Réduction du nombre de paramètres du script en faveur de variables de configuration
+ 	- Les sauvegardes se font dans un repertoire fixe pour faire un rsync sur un serveur distant
+	- suppression de l'option test run, son implementation etait incomplete (bug)
+ 	- modification de l'affichage pour une lecture plus simple
+	- Ajout de la sauvegarde des views
+	- Ajout de la sauvegarde des fonctions et procedures stockees
